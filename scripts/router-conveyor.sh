@@ -31,7 +31,7 @@ name="${REPO#*/}"
 
 pr_snapshot() {
   local pr="$1"
-  gh api graphql -f query='query($owner:String!, $name:String!, $number:Int!) { repository(owner:$owner, name:$name) { pullRequest(number:$number) { number title url state headRefName isDraft mergeStateStatus reviews(first:20) { nodes { author { login } body submittedAt state commit { oid } } } reviewThreads(first:100) { nodes { isResolved isOutdated path line comments(first:20) { nodes { author { login } body url createdAt } } } } } } }' \
+  gh api graphql -f query='query($owner:String!, $name:String!, $number:Int!) { repository(owner:$owner, name:$name) { pullRequest(number:$number) { number title url state headRefName isDraft mergeStateStatus reviews(first:20) { nodes { author { login } body submittedAt state commit { oid } } } reviewThreads(first:100) { nodes { id isResolved isOutdated path line comments(first:20) { nodes { author { login } body url createdAt } } } } } } }' \
     -F owner="$owner" -F name="$name" -F number="$pr"
 }
 
@@ -64,6 +64,7 @@ for thread in threads:
     bodies = [c.get("body", "") for c in comments if (c.get("author") or {}).get("login") == "copilot-pull-request-reviewer"]
     if bodies:
         active_threads.append({
+            "id":   thread.get("id"),
             "path": thread.get("path"),
             "line": thread.get("line"),
             "body": bodies[-1]
