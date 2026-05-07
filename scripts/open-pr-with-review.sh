@@ -16,9 +16,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 cd "$REPO_ROOT"
 
-PR_JSON=$(gh pr create --repo "$REPO" --title "$TITLE" --body "$BODY" --json number,url)
-PR_NUMBER=$(echo "$PR_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['number'])")
-PR_URL=$(echo "$PR_JSON"    | python3 -c "import json,sys; print(json.load(sys.stdin)['url'])")
+PR_URL=$(gh pr create --repo "$REPO" --title "$TITLE" --body "$BODY")
+PR_NUMBER=$(gh pr view "$PR_URL" --repo "$REPO" --json number --jq .number)
 
 "$SCRIPT_DIR/request-copilot-review.sh" "$REPO" "$PR_NUMBER" >/dev/null 2>&1 || true
 

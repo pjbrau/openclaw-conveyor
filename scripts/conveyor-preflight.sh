@@ -48,7 +48,9 @@ case "$action" in
     branch="$(echo "$action_json" | python3 -c "import json,sys; print(json.load(sys.stdin)['branch'])")"
     title="$(echo "$action_json"  | python3 -c "import json,sys; print(json.load(sys.stdin)['title'])")"
     echo "Opening PR for orphaned branch: $branch"
-    git -C "$REPO_ROOT" checkout "$branch"
+    # Force-reset local branch to the remote state (avoids stale local divergence)
+    git -C "$REPO_ROOT" fetch origin "$branch"
+    git -C "$REPO_ROOT" checkout -B "$branch" "origin/$branch"
     result="$(bash "$SCRIPT_DIR/open-pr-with-review.sh" "$title")"
     pr_num="$(echo "$result" | python3 -c "import json,sys; print(json.load(sys.stdin)['pr'])")"
     bash "$SCRIPT_DIR/router-conveyor.sh" record-started "$pr_num"
