@@ -17,6 +17,17 @@ cd "$REPO_ROOT"
 git fetch "$REMOTE" main --quiet
 git checkout main --quiet
 git reset --hard "$REMOTE/main" --quiet
+
+# If the branch exists locally but has NOT been pushed to remote, it's a
+# leftover from a failed previous run — safe to delete and recreate.
+if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+  if git ls-remote --exit-code "$REMOTE" "refs/heads/$BRANCH" >/dev/null 2>&1; then
+    echo "error: branch '$BRANCH' already exists on $REMOTE — cannot recreate" >&2
+    exit 1
+  fi
+  git branch -D "$BRANCH" --quiet
+fi
+
 git checkout -b "$BRANCH" --quiet
 
 sha=$(git rev-parse HEAD)
