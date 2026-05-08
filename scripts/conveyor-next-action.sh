@@ -48,11 +48,24 @@ remote_branches = [
 for remote_branch in sorted(remote_branches):
     local_name = remote_branch.removeprefix('origin/')
 
-    # Skip if no commits ahead of main
+    # Skip if no commits ahead of main (fast-path)
     r = subprocess.run(
         ['git', 'rev-list', '--count', f'origin/main..{remote_branch}'],
         capture_output=True, text=True, cwd=repo_root)
     if int(r.stdout.strip() or '0') == 0:
+        continue
+
+    # Skip if branch adds no new test functions vs main.
+    # Squash-merges leave the branch "ahead" even after merging; checking for
+    # new func Test lines avoids opening duplicate PRs for already-merged content.
+    diff_r = subprocess.run(
+        ['git', 'diff', 'origin/main', remote_branch, '--', '*.go'],
+        capture_output=True, text=True, cwd=repo_root)
+    has_new_tests = any(
+        line.startswith('+func Test')
+        for line in diff_r.stdout.splitlines()
+    )
+    if not has_new_tests:
         continue
 
     # Skip if an open PR already exists for this branch
@@ -147,8 +160,8 @@ for n in numbers:
     if r.returncode == 0 and r.stdout.strip():
         results.append(json.loads(r.stdout.strip()))
 
-# Priority: merge_ready > actionable_review > waiting_for_summary
-for state in ('merge_ready', 'actionable_review', 'waiting_for_summary'):
+# Priority: merge_ready > actionable_review > waiting_for_summary > needs_rebase
+for state in ('merge_ready', 'actionable_review', 'waiting_for_summary', 'needs_rebase'):
     for r in results:
         if r.get('state') == state:
             if state == 'merge_ready':
@@ -167,12 +180,15 @@ for state in ('merge_ready', 'actionable_review', 'waiting_for_summary'):
                     'threads': r.get('activeThreads', [])
                 }))
             else:
+                reason = ('PR has a merge conflict — needs rebase'
+                          if state == 'needs_rebase'
+                          else 'waiting for Copilot review summary')
                 print(json.dumps({
                     'action': 'wait',
                     'pr':     r['pr'],
                     'title':  r['title'],
                     'url':    r['url'],
-                    'reason': 'waiting for Copilot review summary'
+                    'reason': reason
                 }))
             sys.exit(0)
 

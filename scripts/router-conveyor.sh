@@ -73,6 +73,8 @@ if not summary_seen:
     state = "waiting_for_summary"
 elif active_threads:
     state = "actionable_review"
+elif pr.get("mergeStateStatus") == "DIRTY":
+    state = "needs_rebase"
 else:
     state = "merge_ready"
 print(json.dumps({
@@ -146,7 +148,7 @@ PY
 
 merge_pr() {
   local pr="$1"
-  gh pr merge "$pr" --repo "$REPO" --squash >/dev/null
+  gh pr merge "$pr" --repo "$REPO" --squash --delete-branch >/dev/null
   record_merged_pr "$pr"
   gh pr view "$pr" --repo "$REPO" --json state,mergedAt,mergeCommit,url
 }
