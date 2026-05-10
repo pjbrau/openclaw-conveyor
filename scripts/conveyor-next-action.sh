@@ -91,7 +91,59 @@ PY
     exit 0
   fi
 
-  # ── 2. No open PRs — find next coverage target ─────────────────────────
+  # ── 2. Check for open feature issues without an in-progress branch/PR ───
+  feature_json="$(python3 - <<'PY'
+import subprocess, json, sys
+
+result = subprocess.run(
+    ['gh', 'issue', 'list', '--repo', 'pjbrau/openclaw-router-proxy',
+     '--label', 'feature', '--state', 'open',
+     '--json', 'number,title,body'],
+    capture_output=True, text=True)
+issues = json.loads(result.stdout.strip() or '[]')
+# Process lowest-numbered issues first so simpler routing features land before
+# complex translator features (e.g. #141–#146 before #149–#157).
+issues.sort(key=lambda x: x['number'])
+
+repo_root = subprocess.check_output(
+    ['git', 'rev-parse', '--show-toplevel'], text=True).strip()
+
+for issue in issues:
+    number = issue['number']
+    # Derive expected branch name for this issue
+    branch = f'feat/issue-{number}'
+
+    # Skip if a branch already exists remotely
+    r = subprocess.run(
+        ['git', 'ls-remote', '--heads', 'origin', branch],
+        capture_output=True, text=True, cwd=repo_root)
+    if r.stdout.strip():
+        continue
+
+    # Skip if an open PR already references this issue
+    pr_r = subprocess.run(
+        ['gh', 'pr', 'list', '--repo', 'pjbrau/openclaw-router-proxy',
+         '--search', f'#{number}', '--state', 'open', '--json', 'number'],
+        capture_output=True, text=True)
+    if json.loads(pr_r.stdout.strip() or '[]'):
+        continue
+
+    print(json.dumps({
+        'action': 'feature',
+        'issue':  number,
+        'title':  issue['title'],
+        'body':   issue['body'],
+        'branch': branch,
+    }))
+    sys.exit(0)
+PY
+  )"
+  if [[ -n "$feature_json" ]]; then
+    echo "$feature_json"
+    exit 0
+  fi
+
+  # ── 3. No open PRs — find next coverage target ─────────────────────────
   gaps_file="$(mktemp)"
   "$SCRIPT_DIR/coverage-gaps.sh" >"$gaps_file"
   python3 - "$gaps_file" <<'PY'
