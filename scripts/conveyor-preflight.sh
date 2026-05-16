@@ -57,6 +57,36 @@ case "$action" in
     echo "Opened PR #$pr_num for $branch"
     ;;
 
+  feature|brainstorm)
+    # Feature or brainstorm action — wake the LLM cron job to handle
+    echo "Starting LLM agent for $action"
+    python3 - "$JOBS_STATE" "$CONVEYOR_JOB_ID" <<'PY'
+import json, sys, time, os, tempfile, shutil
+
+state_path, job_id = sys.argv[1], sys.argv[2]
+now_ms = int(time.time() * 1000)
+
+with open(state_path) as f:
+    state = json.load(f)
+
+job = state['jobs'].get(job_id, {})
+job_state = job.get('state', {})
+
+# Immediate trigger for feature/brainstorm
+job_state['nextRunAtMs'] = now_ms + 1_000  # 1 second from now
+
+job['state'] = job_state
+state['jobs'][job_id] = job
+
+# Write atomically
+tmp = state_path + '.tmp'
+with open(tmp, 'w') as f:
+    json.dump(state, f, indent=2)
+shutil.move(tmp, state_path)
+print(f"Triggered LLM cron job for feature/brainstorm")
+PY
+    ;;
+
   new-slice|fix-review)
     # Wake the LLM cron job after a backoff delay that grows with consecutive errors
     python3 - "$JOBS_STATE" "$CONVEYOR_JOB_ID" <<'PY'
