@@ -31,7 +31,7 @@ name="${REPO#*/}"
 
 pr_snapshot() {
   local pr="$1"
-  gh api graphql -f query='query($owner:String!, $name:String!, $number:Int!) { repository(owner:$owner, name:$name) { pullRequest(number:$number) { number title url state headRefName isDraft mergeStateStatus reviews(first:20) { nodes { author { login } body submittedAt state commit { oid } } } reviewThreads(first:100) { nodes { id isResolved isOutdated path line comments(first:20) { nodes { author { login } body url createdAt } } } } } } }' \
+  gh api graphql -f query='query($owner:String!, $name:String!, $number:Int!) { repository(owner:$owner, name:$name) { pullRequest(number:$number) { number title url state headRefName isDraft mergeStateStatus reviewRequests(first:10) { nodes { requestedReviewer { ... on User { login } ... on Team { slug } } } } reviews(first:20) { nodes { author { login } body submittedAt state commit { oid } } } reviewThreads(first:100) { nodes { id isResolved isOutdated path line comments(first:20) { nodes { author { login } body url createdAt } } } } } } }' \
     -F owner="$owner" -F name="$name" -F number="$pr"
 }
 
@@ -56,6 +56,11 @@ pr = payload["data"]["repository"]["pullRequest"]
 reviews = pr.get("reviews", {}).get("nodes", [])
 threads = pr.get("reviewThreads", {}).get("nodes", [])
 summary_seen = any((r.get("author") or {}).get("login") == "copilot-pull-request-reviewer" for r in reviews)
+review_requests = pr.get("reviewRequests", {}).get("nodes", [])
+copilot_requested = any(
+    (node.get("requestedReviewer") or {}).get("login") == "copilot-pull-request-reviewer"
+    for node in review_requests
+)
 active_threads = []
 for thread in threads:
     if thread.get("isResolved") or thread.get("isOutdated"):
@@ -69,7 +74,9 @@ for thread in threads:
             "line": thread.get("line"),
             "body": bodies[-1]
         })
-if not summary_seen:
+if not summary_seen and not copilot_requested:
+    state = "needs_reviewer"
+elif not summary_seen:
     state = "waiting_for_summary"
 elif active_threads:
     state = "actionable_review"
@@ -85,6 +92,7 @@ print(json.dumps({
     "state": state,
     "activeThreads": active_threads,
     "summarySeen": summary_seen,
+    "copilotRequested": copilot_requested,
     "mergeStateStatus": pr.get("mergeStateStatus")
 }))
 PY

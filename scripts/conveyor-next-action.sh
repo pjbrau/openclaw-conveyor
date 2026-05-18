@@ -91,43 +91,84 @@ PY
     exit 0
   fi
 
-  # ── 2. Check for open feature issues without an in-progress branch/PR ───
-  feature_json="$(python3 - <<'PY'
-import subprocess, json, sys
+  # ── 2 & 3. Brainstorm check + next feature issue ────────────────────────
+  # Bulk-fetch all remote feat/ branch refs and all open PRs in one call each
+  # instead of one git ls-remote + one gh pr list per issue (O(n) → O(1)).
+  feature_or_brainstorm_json="$(python3 - <<'PY'
+import subprocess, json, sys, os, time
 
-result = subprocess.run(
-    ['gh', 'issue', 'list', '--repo', 'pjbrau/openclaw-router-proxy',
-     '--label', 'feature', '--state', 'open',
-     '--json', 'number,title,body'],
-    capture_output=True, text=True)
-issues = json.loads(result.stdout.strip() or '[]')
-# Process lowest-numbered issues first so simpler routing features land before
-# complex translator features (e.g. #141–#146 before #149–#157).
-issues.sort(key=lambda x: x['number'])
+BRAINSTORM_MIN_QUEUE     = 15
+BRAINSTORM_INTERVAL_DAYS = 7
 
 repo_root = subprocess.check_output(
     ['git', 'rev-parse', '--show-toplevel'], text=True).strip()
 
+# ── bulk fetch 1: all remote feat/ branches (one network call) ──────────
+ls_r = subprocess.run(
+    ['git', 'ls-remote', '--heads', 'origin', 'refs/heads/feat/*'],
+    capture_output=True, text=True, cwd=repo_root)
+remote_feat_branches = set()
+for line in ls_r.stdout.splitlines():
+    # format: <sha>\trefs/heads/feat/issue-N
+    parts = line.split('\t')
+    if len(parts) == 2:
+        remote_feat_branches.add(parts[1].removeprefix('refs/heads/'))
+
+# ── bulk fetch 2: all open PRs (one network call) ────────────────────────
+prs_r = subprocess.run(
+    ['gh', 'pr', 'list', '--repo', 'pjbrau/openclaw-router-proxy',
+     '--state', 'open', '--json', 'number,body', '--limit', '200'],
+    capture_output=True, text=True)
+open_prs = json.loads(prs_r.stdout.strip() or '[]')
+# Build set of issue numbers already referenced by an open PR
+import re as _re
+pr_issue_refs = set()
+for pr in open_prs:
+    for m in _re.finditer(r'#(\d+)', pr.get('body') or ''):
+        pr_issue_refs.add(int(m.group(1)))
+
+# ── bulk fetch 3: all open feature issues (one network call) ─────────────
+issues_r = subprocess.run(
+    ['gh', 'issue', 'list', '--repo', 'pjbrau/openclaw-router-proxy',
+     '--label', 'feature', '--state', 'open',
+     '--json', 'number,title,body', '--limit', '200'],
+    capture_output=True, text=True)
+issues = json.loads(issues_r.stdout.strip() or '[]')
+issues.sort(key=lambda x: x['number'])
+
+# ── brainstorm check ─────────────────────────────────────────────────────
+unstarted = [i['number'] for i in issues
+             if f'feat/issue-{i["number"]}' not in remote_feat_branches]
+
+marker = os.path.expanduser('~/.openclaw/last-brainstorm-at')
+last_ts = 0
+if os.path.exists(marker):
+    try:
+        last_ts = float(open(marker).read().strip())
+    except Exception:
+        pass
+days_since = (time.time() - last_ts) / 86400
+
+queue_low = len(unstarted) < BRAINSTORM_MIN_QUEUE
+overdue   = days_since >= BRAINSTORM_INTERVAL_DAYS
+
+if queue_low or overdue:
+    print(json.dumps({
+        'action':             'brainstorm',
+        'open_feature_count': len(unstarted),
+        'days_since_last':    round(days_since, 1),
+        'reason':             'queue_low' if queue_low else 'scheduled',
+    }))
+    sys.exit(0)
+
+# ── next feature issue ───────────────────────────────────────────────────
 for issue in issues:
     number = issue['number']
-    # Derive expected branch name for this issue
     branch = f'feat/issue-{number}'
-
-    # Skip if a branch already exists remotely
-    r = subprocess.run(
-        ['git', 'ls-remote', '--heads', 'origin', branch],
-        capture_output=True, text=True, cwd=repo_root)
-    if r.stdout.strip():
+    if branch in remote_feat_branches:
         continue
-
-    # Skip if an open PR already references this issue
-    pr_r = subprocess.run(
-        ['gh', 'pr', 'list', '--repo', 'pjbrau/openclaw-router-proxy',
-         '--search', f'#{number}', '--state', 'open', '--json', 'number'],
-        capture_output=True, text=True)
-    if json.loads(pr_r.stdout.strip() or '[]'):
+    if number in pr_issue_refs:
         continue
-
     print(json.dumps({
         'action': 'feature',
         'issue':  number,
@@ -138,8 +179,8 @@ for issue in issues:
     sys.exit(0)
 PY
   )"
-  if [[ -n "$feature_json" ]]; then
-    echo "$feature_json"
+  if [[ -n "$feature_or_brainstorm_json" ]]; then
+    echo "$feature_or_brainstorm_json"
     exit 0
   fi
 
@@ -212,8 +253,8 @@ for n in numbers:
     if r.returncode == 0 and r.stdout.strip():
         results.append(json.loads(r.stdout.strip()))
 
-# Priority: merge_ready > actionable_review > waiting_for_summary > needs_rebase
-for state in ('merge_ready', 'actionable_review', 'waiting_for_summary', 'needs_rebase'):
+# Priority: merge_ready > actionable_review > needs_reviewer > waiting_for_summary > needs_rebase
+for state in ('merge_ready', 'actionable_review', 'needs_reviewer', 'waiting_for_summary', 'needs_rebase'):
     for r in results:
         if r.get('state') == state:
             if state == 'merge_ready':
@@ -230,6 +271,13 @@ for state in ('merge_ready', 'actionable_review', 'waiting_for_summary', 'needs_
                     'title':   r['title'],
                     'url':     r['url'],
                     'threads': r.get('activeThreads', [])
+                }))
+            elif state == 'needs_reviewer':
+                print(json.dumps({
+                    'action': 'add-reviewer',
+                    'pr':     r['pr'],
+                    'title':  r['title'],
+                    'url':    r['url']
                 }))
             else:
                 reason = ('PR has a merge conflict — needs rebase'

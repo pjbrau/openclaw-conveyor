@@ -45,6 +45,6 @@ fi
 PR_URL=$(gh pr create --repo "$REPO" --title "$TITLE" --body "$BODY")
 PR_NUMBER=$(gh pr view "$PR_URL" --repo "$REPO" --json number --jq .number)
 
-"$SCRIPT_DIR/request-copilot-review.sh" "$REPO" "$PR_NUMBER" >/dev/null 2>&1 || true
+"$SCRIPT_DIR/request-copilot-review.sh" "$REPO" "$PR_NUMBER" || echo "warning: failed to add Copilot reviewer — preflight will retry via add-reviewer action" >&2
 
 echo "{\"pr\": $PR_NUMBER, \"url\": \"$PR_URL\"}"
