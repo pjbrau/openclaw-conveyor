@@ -60,7 +60,7 @@ case "$action" in
   add-reviewer)
     pr="$(echo "$action_json" | python3 -c "import json,sys; print(json.load(sys.stdin)['pr'])")"
     echo "Adding Copilot reviewer to PR #$pr"
-    bash "$SCRIPT_DIR/request-copilot-review.sh" "$REPO" "$pr"
+    bash "$SCRIPT_DIR/request-copilot-review.sh" "${ROUTER_PROXY_REPO:-pjbrau/openclaw-router-proxy}" "$pr"
     ;;
 
   feature|brainstorm)
