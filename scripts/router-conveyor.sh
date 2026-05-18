@@ -55,28 +55,23 @@ with open(sys.argv[1]) as f:
 pr = payload["data"]["repository"]["pullRequest"]
 reviews = pr.get("reviews", {}).get("nodes", [])
 threads = pr.get("reviewThreads", {}).get("nodes", [])
-summary_seen = any((r.get("author") or {}).get("login") == "copilot-pull-request-reviewer" for r in reviews)
-review_requests = pr.get("reviewRequests", {}).get("nodes", [])
-copilot_requested = any(
-    (node.get("requestedReviewer") or {}).get("login") == "copilot-pull-request-reviewer"
-    for node in review_requests
-)
+# Accept any reviewer — Copilot is preferred but not required.
+summary_seen = len(reviews) > 0
 active_threads = []
 for thread in threads:
     if thread.get("isResolved") or thread.get("isOutdated"):
         continue
     comments = thread.get("comments", {}).get("nodes", [])
-    bodies = [c.get("body", "") for c in comments if (c.get("author") or {}).get("login") == "copilot-pull-request-reviewer"]
-    if bodies:
+    if comments:
+        last = comments[-1]
         active_threads.append({
-            "id":   thread.get("id"),
-            "path": thread.get("path"),
-            "line": thread.get("line"),
-            "body": bodies[-1]
+            "id":     thread.get("id"),
+            "path":   thread.get("path"),
+            "line":   thread.get("line"),
+            "body":   last.get("body", ""),
+            "author": (last.get("author") or {}).get("login", ""),
         })
-if not summary_seen and not copilot_requested:
-    state = "needs_reviewer"
-elif not summary_seen:
+if not summary_seen:
     state = "waiting_for_summary"
 elif active_threads:
     state = "actionable_review"
@@ -92,7 +87,6 @@ print(json.dumps({
     "state": state,
     "activeThreads": active_threads,
     "summarySeen": summary_seen,
-    "copilotRequested": copilot_requested,
     "mergeStateStatus": pr.get("mergeStateStatus")
 }))
 PY

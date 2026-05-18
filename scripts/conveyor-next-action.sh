@@ -253,8 +253,8 @@ for n in numbers:
     if r.returncode == 0 and r.stdout.strip():
         results.append(json.loads(r.stdout.strip()))
 
-# Priority: merge_ready > actionable_review > needs_reviewer > waiting_for_summary > needs_rebase
-for state in ('merge_ready', 'actionable_review', 'needs_reviewer', 'waiting_for_summary', 'needs_rebase'):
+# Priority: merge_ready > actionable_review > waiting_for_summary > needs_rebase
+for state in ('merge_ready', 'actionable_review', 'waiting_for_summary', 'needs_rebase'):
     for r in results:
         if r.get('state') == state:
             if state == 'merge_ready':
@@ -271,13 +271,6 @@ for state in ('merge_ready', 'actionable_review', 'needs_reviewer', 'waiting_for
                     'title':   r['title'],
                     'url':     r['url'],
                     'threads': r.get('activeThreads', [])
-                }))
-            elif state == 'needs_reviewer':
-                print(json.dumps({
-                    'action': 'add-reviewer',
-                    'pr':     r['pr'],
-                    'title':  r['title'],
-                    'url':    r['url']
                 }))
             else:
                 reason = ('PR has a merge conflict — needs rebase'

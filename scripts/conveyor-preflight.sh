@@ -57,11 +57,6 @@ case "$action" in
     echo "Opened PR #$pr_num for $branch"
     ;;
 
-  add-reviewer)
-    pr="$(echo "$action_json" | python3 -c "import json,sys; print(json.load(sys.stdin)['pr'])")"
-    echo "Adding Copilot reviewer to PR #$pr"
-    bash "$SCRIPT_DIR/request-copilot-review.sh" "${ROUTER_PROXY_REPO:-pjbrau/openclaw-router-proxy}" "$pr"
-    ;;
 
   feature|brainstorm)
     # Feature or brainstorm action — wake the LLM cron job to handle
