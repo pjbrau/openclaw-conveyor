@@ -146,6 +146,37 @@ PROMPT
 )"
     ;;
 
+  feature|brainstorm)
+    issue="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d.get("issue","?"))' "$action_json")"
+    branch="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d.get("suggested_branch","?"))' "$action_json")"
+    echo "$LOG_TAG $action #$issue ($branch) — firing agent"
+    _notify "$action fired for issue #$issue ($branch)"
+    _fire_agent "fannyclaw/auto" 1800 "$(cat <<PROMPT
+⚠️ Automated ${action} task for ${REPO}. One action, then stop.
+
+Project dir: ${PROJECT_DIR}
+Scripts:     ${SCRIPTS}
+
+Oracle result:
+${action_json}
+
+Read the issue body above. Implement minimally to satisfy the acceptance criteria.
+Grep before reading files; only read what you need to touch.
+
+bash ${SCRIPTS}/start-slice.sh ${branch}
+<implement>
+go build ./...
+go test ./...
+git add -A && git commit -m "feat: <title from issue>" && git push
+*** NEVER use gh pr create directly ***
+bash ${SCRIPTS}/open-pr-with-review.sh "feat: <title>" "Closes #${issue}"
+pr_num=\$(gh pr list --repo ${REPO} --head ${branch} --state open --json number -q '.[0].number')
+bash ${SCRIPTS}/router-conveyor.sh record-started "\$pr_num"
+Stop.
+PROMPT
+)"
+    ;;
+
   *)
     echo "$LOG_TAG unknown action '$action' — firing fallback agent" >&2
     _notify "unknown action '$action' — fallback agent fired"
