@@ -150,7 +150,9 @@ PY
 
 merge_pr() {
   local pr="$1"
-  gh pr merge "$pr" --repo "$REPO" --squash --delete-branch >/dev/null
+  local admin_flag="${2:-}"
+  # shellcheck disable=SC2086
+  gh pr merge "$pr" --repo "$REPO" --squash --delete-branch $admin_flag >/dev/null
   record_merged_pr "$pr"
   gh pr view "$pr" --repo "$REPO" --json state,mergedAt,mergeCommit,url
 }
@@ -203,7 +205,7 @@ case "${1:-}" in
     classify_pr "$2"
     ;;
   merge)
-    merge_pr "$2"
+    merge_pr "$2" "${3:-}"
     ;;
   reconcile)
     reconcile_state

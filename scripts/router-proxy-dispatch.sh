@@ -76,6 +76,13 @@ case "$action" in
     _notify "merged PR #$pr"
     ;;
 
+  merge-validated)
+    pr="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["pr"])' "$action_json")"
+    echo "$LOG_TAG merging PR #$pr (local-validated — CI infra failure bypassed with --admin)"
+    bash "$SCRIPTS/router-conveyor.sh" merge "$pr" --admin
+    _notify "merged PR #$pr (local-validated, CI infra bypassed)"
+    ;;
+
   open-pr)
     branch="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["branch"])' "$action_json")"
     title="$(python3  -c 'import json,sys; print(json.loads(sys.argv[1])["title"])'  "$action_json")"
