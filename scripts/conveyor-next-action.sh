@@ -149,15 +149,26 @@ if os.path.exists(marker):
         pass
 days_since = (time.time() - last_ts) / 86400
 
-queue_low = len(unstarted) < BRAINSTORM_MIN_QUEUE
-overdue   = days_since >= BRAINSTORM_INTERVAL_DAYS
+# Read tech-watch report — primary brainstorm trigger
+tw_file = os.path.expanduser('~/.openclaw/workspace/tech-watch-pjbrau-openclaw-router-proxy.md')
+tw_content = ''
+tw_has_signal = False
+if os.path.exists(tw_file):
+    tw_content = open(tw_file).read()
+    tw_mtime = os.path.getmtime(tw_file)
+    if tw_mtime > last_ts and 'BRAINSTORM: YES' in tw_content:
+        tw_has_signal = True
 
-if queue_low or overdue:
+# Safety net: critically empty queue; otherwise signal-driven only
+queue_critical = len(unstarted) < 3
+
+if queue_critical or tw_has_signal:
     print(json.dumps({
         'action':             'brainstorm',
         'open_feature_count': len(unstarted),
         'days_since_last':    round(days_since, 1),
-        'reason':             'queue_low' if queue_low else 'scheduled',
+        'reason':             'queue_critical' if queue_critical else 'tech_watch_signal',
+        'tech_watch':         tw_content[-3000:] if tw_content else '',
     }))
     sys.exit(0)
 

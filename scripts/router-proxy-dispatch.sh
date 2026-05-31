@@ -153,13 +153,13 @@ PROMPT
 )"
     ;;
 
-  feature|brainstorm)
+  feature)
     issue="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d.get("issue","?"))' "$action_json")"
     branch="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d.get("suggested_branch","?"))' "$action_json")"
-    echo "$LOG_TAG $action #$issue ($branch) — firing agent"
-    _notify "$action fired for issue #$issue ($branch)"
+    echo "$LOG_TAG feature #$issue ($branch) — firing agent"
+    _notify "feature fired for issue #$issue ($branch)"
     _fire_agent "fannyclaw/auto" 1800 "$(cat <<PROMPT
-⚠️ Automated ${action} task for ${REPO}. One action, then stop.
+⚠️ Automated feature task for ${REPO}. One action, then stop.
 
 Project dir: ${PROJECT_DIR}
 Scripts:     ${SCRIPTS}
@@ -179,6 +179,55 @@ git add -A && git commit -m "feat: <title from issue>" && git push
 bash ${SCRIPTS}/open-pr-with-review.sh "feat: <title>" "Closes #${issue}"
 pr_num=\$(gh pr list --repo ${REPO} --head ${branch} --state open --json number -q '.[0].number')
 bash ${SCRIPTS}/router-conveyor.sh record-started "\$pr_num"
+Stop.
+PROMPT
+)"
+    ;;
+
+  brainstorm)
+    reason="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("reason",""))' "$action_json")"
+    tech_watch="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("tech_watch",""))' "$action_json")"
+    echo "$LOG_TAG brainstorm (reason=$reason) — firing agent"
+    _notify "brainstorm fired: $reason"
+    _fire_agent "fannyclaw/auto" 900 "$(cat <<PROMPT
+⚠️ Automated brainstorm for ${REPO}. Create targeted issues or skip if unwarranted, then stop.
+
+Project dir: ${PROJECT_DIR}
+Trigger:     ${reason}
+
+## Step 1 — Load product context
+Read ${PROJECT_DIR}/BRAINSTORM_CONTEXT.md fully.
+
+## Step 2 — Load existing issues (deduplication)
+  Open:   gh issue list --repo ${REPO} --state open   --limit 100 --json number,title
+  Closed: gh issue list --repo ${REPO} --state closed --limit 50  --json number,title
+
+## Step 3 — Tech-watch signals (primary input)
+${tech_watch:-"(no tech-watch report — assess from product context only)"}
+
+## Step 4 — Decision
+Apply a strict quality bar:
+- If product serves its purpose and no signals exist → create 0 issues, record timestamp, stop.
+- If tech_watch has BRAINSTORM: YES signals → create 2-5 issues targeting those signals directly.
+- If trigger is queue_critical → create 3-6 issues covering highest-priority genuine gaps.
+
+Each issue must pass: "Would this make the product considerably better, not just bigger?"
+
+## Step 5 — Create issues (only if warranted)
+  gh issue create --repo ${REPO} --label feature \\
+    --title "feat: <title>" \\
+    --body "\$(cat <<'BODY'
+## Objective
+<why this matters and what changed to make it necessary>
+
+## Acceptance Criteria
+- [ ] <specific, testable criterion>
+BODY
+)"
+
+## Step 6 — Record timestamp
+  date +%s > ~/.openclaw/last-brainstorm-at
+
 Stop.
 PROMPT
 )"
