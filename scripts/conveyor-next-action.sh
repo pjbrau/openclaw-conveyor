@@ -131,7 +131,7 @@ for pr in open_prs:
 issues_r = subprocess.run(
     ['gh', 'issue', 'list', '--repo', 'pjbrau/openclaw-router-proxy',
      '--label', 'feature', '--state', 'open',
-     '--json', 'number,title,body', '--limit', '200'],
+     '--json', 'number,title,body,labels', '--limit', '200'],
     capture_output=True, text=True)
 issues = json.loads(issues_r.stdout.strip() or '[]')
 issues.sort(key=lambda x: x['number'])
@@ -172,6 +172,50 @@ if queue_critical or tw_has_signal:
     }))
     sys.exit(0)
 
+# ── quality gate helpers ─────────────────────────────────────────────────
+def _has_label(issue, name):
+    return any(l.get('name') == name for l in (issue.get('labels') or []))
+
+def _score_quality(body):
+    text = (body or '').strip()
+    if not text:
+        return 0, ['empty body']
+    score, reasons = 0, []
+    words = len(text.split())
+    if words >= 50:  score += 20
+    else:            reasons.append(f'body too short ({words} words, need ≥50)')
+    if words >= 120: score += 20
+    if re.search(r'##\s*(objective|acceptance|criteria|goal|requirement)', text, re.IGNORECASE):
+        score += 25
+    else:
+        reasons.append('missing ## Objective or ## Acceptance Criteria section')
+    if '- [ ]' in text:     score += 20
+    else:                    reasons.append('no acceptance criteria checkboxes (- [ ])')
+    if re.search(r'`[^`\n]+`', text): score += 15
+    return score, reasons
+
+QUALITY_THRESHOLD = 60
+REPO = 'pjbrau/openclaw-router-proxy'
+
+def _flag_needs_spec(number, reasons):
+    subprocess.run(['gh', 'label', 'create', 'needs-spec', '--repo', REPO,
+                    '--color', 'FFA500',
+                    '--description', 'Needs more specification before agent dispatch',
+                    '--force'], capture_output=True)
+    subprocess.run(['gh', 'issue', 'edit', str(number), '--repo', REPO,
+                    '--add-label', 'needs-spec'], capture_output=True)
+    missing = '\n'.join(f'- {r}' for r in reasons)
+    comment = (
+        '🤖 **Issue quality gate** — needs more detail before an agent can implement this.\n\n'
+        f'**Missing:**\n{missing}\n\n'
+        '**Suggested additions:**\n'
+        '```\n## Objective\n<why this matters>\n\n'
+        '## Acceptance Criteria\n- [ ] <specific, testable criterion>\n```\n\n'
+        'Add the missing detail and remove the `needs-spec` label to re-queue.'
+    )
+    subprocess.run(['gh', 'issue', 'comment', str(number), '--repo', REPO,
+                    '--body', comment], capture_output=True)
+
 # ── next feature issue ───────────────────────────────────────────────────
 for issue in issues:
     number = issue['number']
@@ -180,14 +224,19 @@ for issue in issues:
         continue
     if number in pr_issue_refs:
         continue
-    print(json.dumps({
-        'action': 'feature',
-        'issue':  number,
-        'title':  issue['title'],
-        'body':   issue['body'],
-        'branch': branch,
-    }))
-    sys.exit(0)
+    if _has_label(issue, 'needs-spec'):
+        continue
+    score, reasons = _score_quality(issue.get('body'))
+    if score >= QUALITY_THRESHOLD:
+        print(json.dumps({
+            'action': 'feature',
+            'issue':  number,
+            'title':  issue['title'],
+            'body':   issue['body'],
+            'branch': branch,
+        }))
+        sys.exit(0)
+    _flag_needs_spec(number, reasons)
 PY
   )"
   if [[ -n "$feature_or_brainstorm_json" ]]; then

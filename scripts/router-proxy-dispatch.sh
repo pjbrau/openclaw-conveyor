@@ -155,7 +155,7 @@ PROMPT
 
   feature)
     issue="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d.get("issue","?"))' "$action_json")"
-    branch="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d.get("suggested_branch","?"))' "$action_json")"
+    branch="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d.get("branch","?"))' "$action_json")"
     echo "$LOG_TAG feature #$issue ($branch) — firing agent"
     _notify "feature fired for issue #$issue ($branch)"
     _fire_agent "fannyclaw/auto" 1800 "$(cat <<PROMPT
