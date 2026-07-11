@@ -93,12 +93,14 @@ PY
 
   # ── 2. Check for open feature issues without an in-progress branch/PR ───
   feature_json="$(python3 - <<'PY'
-import subprocess, json, sys
+import subprocess, json, sys, os
+
+REPO = 'pjbrau/openclaw-router-proxy'
 
 result = subprocess.run(
-    ['gh', 'issue', 'list', '--repo', 'pjbrau/openclaw-router-proxy',
+    ['gh', 'issue', 'list', '--repo', REPO,
      '--label', 'feature', '--state', 'open',
-     '--json', 'number,title,body'],
+     '--json', 'number,title,body,labels'],
     capture_output=True, text=True)
 issues = json.loads(result.stdout.strip() or '[]')
 # Process lowest-numbered issues first so simpler routing features land before
@@ -107,6 +109,41 @@ issues.sort(key=lambda x: x['number'])
 
 repo_root = subprocess.check_output(
     ['git', 'rev-parse', '--show-toplevel'], text=True).strip()
+
+def _has_label(issue, name):
+    return any(l.get('name') == name for l in (issue.get('labels') or []))
+
+# Scope gate: block a feature issue when scripts/feature-scope-gate.sh denies it
+# (e.g. a new provider translator for a backend with zero live traffic across
+# any deployment). Reversible — labels the issue out-of-scope rather than closing.
+def _scope_gate_denied(issue):
+    gate = os.path.join(repo_root, 'scripts', 'feature-scope-gate.sh')
+    if not os.path.exists(gate):
+        return None
+    gr = subprocess.run([gate, issue.get('title') or '', issue.get('body') or ''],
+                        capture_output=True, text=True)
+    if gr.returncode == 3:
+        try:
+            return json.loads(gr.stdout.strip() or '{}').get('reason', 'out of scope')
+        except Exception:
+            return 'out of scope'
+    return None
+
+def _flag_out_of_scope(number, reason):
+    subprocess.run(['gh', 'label', 'create', 'out-of-scope', '--repo', REPO,
+                    '--color', '888888',
+                    '--description', 'Blocked by scope gate — no observed need',
+                    '--force'], capture_output=True)
+    subprocess.run(['gh', 'issue', 'edit', str(number), '--repo', REPO,
+                    '--add-label', 'out-of-scope'], capture_output=True)
+    body = ('🤖 **Scope gate** — blocked by `scripts/feature-scope-gate.sh`.\n\n'
+            f'**Reason:** {reason}\n\n'
+            'The product already delivers its vision; new backends are only in '
+            'scope once they receive real traffic on some deployment. Override by '
+            'adding the provider to `SCOPE_GATE_ALLOW`, or remove the '
+            '`out-of-scope` label to force a re-queue.')
+    subprocess.run(['gh', 'issue', 'comment', str(number), '--repo', REPO,
+                    '--body', body], capture_output=True)
 
 for issue in issues:
     number = issue['number']
@@ -122,10 +159,20 @@ for issue in issues:
 
     # Skip if an open PR already references this issue
     pr_r = subprocess.run(
-        ['gh', 'pr', 'list', '--repo', 'pjbrau/openclaw-router-proxy',
+        ['gh', 'pr', 'list', '--repo', REPO,
          '--search', f'#{number}', '--state', 'open', '--json', 'number'],
         capture_output=True, text=True)
     if json.loads(pr_r.stdout.strip() or '[]'):
+        continue
+
+    # Skip issues already parked out-of-scope (avoids re-labelling every tick)
+    if _has_label(issue, 'out-of-scope'):
+        continue
+
+    # Scope gate — park out-of-scope and skip if the backend has no real usage
+    _reason = _scope_gate_denied(issue)
+    if _reason is not None:
+        _flag_out_of_scope(number, _reason)
         continue
 
     print(json.dumps({
