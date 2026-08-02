@@ -185,13 +185,13 @@ def _score_quality(body):
     if words >= 50:  score += 20
     else:            reasons.append(f'body too short ({words} words, need ≥50)')
     if words >= 120: score += 20
-    if re.search(r'##\s*(objective|acceptance|criteria|goal|requirement)', text, re.IGNORECASE):
+    if _re.search(r'##\s*(objective|acceptance|criteria|goal|requirement)', text, _re.IGNORECASE):
         score += 25
     else:
         reasons.append('missing ## Objective or ## Acceptance Criteria section')
     if '- [ ]' in text:     score += 20
     else:                    reasons.append('no acceptance criteria checkboxes (- [ ])')
-    if re.search(r'`[^`\n]+`', text): score += 15
+    if _re.search(r'`[^`\n]+`', text): score += 15
     return score, reasons
 
 QUALITY_THRESHOLD = 60
