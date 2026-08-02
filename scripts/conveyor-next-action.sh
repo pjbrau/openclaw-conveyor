@@ -76,6 +76,25 @@ for remote_branch in sorted(remote_branches):
     if json.loads(pr_r.stdout.strip() or '[]'):
         continue
 
+    # Skip if this exact head was already rejected. Closing a PR leaves its
+    # branch behind, so without this the branch reads as unfiled work and the
+    # conveyor opens it again — turning a human's "no" back into open work.
+    # Matching on the head SHA, not the branch: these branch names get recycled
+    # for successive coverage slices, and a new head is new work that should
+    # still get a PR.
+    tip_r = subprocess.run(
+        ['git', 'rev-parse', remote_branch],
+        capture_output=True, text=True, cwd=repo_root)
+    tip = tip_r.stdout.strip()
+    closed_r = subprocess.run(
+        ['gh', 'pr', 'list', '--repo', 'pjbrau/openclaw-router-proxy',
+         '--head', local_name, '--state', 'closed',
+         '--json', 'number,headRefOid', '--limit', '10'],
+        capture_output=True, text=True)
+    if tip and any(p.get('headRefOid') == tip
+                   for p in json.loads(closed_r.stdout.strip() or '[]')):
+        continue
+
     # Derive PR title from the latest commit subject
     msg_r = subprocess.run(
         ['git', 'log', '-1', '--format=%s', remote_branch],
