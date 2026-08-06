@@ -20,6 +20,60 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)/openclaw-router-proxy}"
 JOBS_STATE="${JOBS_STATE:-$HOME/.openclaw/cron/jobs-state.json}"
 CONVEYOR_JOB_ID="06801882-7703-44b5-a5f4-866749123947"
 LOCK_FILE="/tmp/conveyor-preflight.lock"
+STATE_DIR="${STATE_DIR:-$SCRIPT_DIR/../state}"
+STREAK_MARKER="$STATE_DIR/error-streak-alerted"
+STREAK_THRESHOLD="${STREAK_THRESHOLD:-5}"
+DISCORD_CHANNEL="${CONVEYOR_NOTIFY_CHANNEL:-1495795961069305897}"
+
+# Same shape as router-proxy-dispatch.sh: the message is passed as a single argv
+# entry, never interpolated into a shell command line.
+_notify() {
+  openclaw message send --channel discord --target "$DISCORD_CHANNEL" \
+    --silent --message "[pjbrau-openclaw-router-proxy] $*" 2>/dev/null || true
+}
+
+# Alert on a sustained LLM-job failure streak.
+#
+# The backoff below caps at 300s and then retries forever in silence. On 2026-08-05
+# that ran ~7 hours overnight (consecutiveErrors 17 → 29, 20:35 → 03:30) with no
+# notification of any kind — the only trace was a counter in the journal. Every other
+# conveyor in the fleet reports when it gets stuck; this one, the unattended one
+# burning a paid API, did not.
+#
+# One-shot per streak, so a wedged job cannot spam the channel — the marker also
+# carries the running peak so the recovery message can report how bad it got.
+_check_error_streak() {
+  local errors prev peak
+  errors="$(python3 - "$JOBS_STATE" "$CONVEYOR_JOB_ID" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    print(int(d['jobs'].get(sys.argv[2], {}).get('state', {}).get('consecutiveErrors', 0)))
+except Exception:
+    print(0)   # never let a state-file hiccup abort the tick
+PY
+)"
+  mkdir -p "$STATE_DIR"
+  prev=0
+  if [[ -f "$STREAK_MARKER" ]]; then
+    prev="$(cat "$STREAK_MARKER" 2>/dev/null || echo 0)"
+  fi
+
+  if [[ "$errors" -ge "$STREAK_THRESHOLD" ]]; then
+    if [[ "$prev" -eq 0 ]]; then
+      _notify "⚠️ conveyor LLM job has failed $errors times in a row — backoff pinned at 5 min, no work is landing. Check \`fannyclaw status\` and the agent logs."
+      echo "error-streak alert sent (errors=$errors)"
+    fi
+    if [[ "$errors" -gt "$prev" ]]; then
+      echo "$errors" > "$STREAK_MARKER"
+    fi
+  elif [[ "$errors" -eq 0 && "$prev" -ne 0 ]]; then
+    peak="$prev"
+    rm -f "$STREAK_MARKER"
+    _notify "✅ conveyor LLM job recovered — streak peaked at $peak consecutive errors."
+    echo "error-streak cleared (peaked at $peak)"
+  fi
+}
 
 # Prevent overlapping runs
 exec 9>"$LOCK_FILE"
@@ -31,6 +85,11 @@ action_json="$("$SCRIPT_DIR/conveyor-next-action.sh" 2>&1)"
 action="$(echo "$action_json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('action',''))")"
 
 echo "$(date -Iseconds) action=$action"
+
+# Before dispatching: every tick, whatever the action. Checking only inside the
+# new-slice branch would mean a streak that ends while the conveyor is merging or
+# idle goes unreported until the next slice.
+_check_error_streak
 
 case "$action" in
   wait)
