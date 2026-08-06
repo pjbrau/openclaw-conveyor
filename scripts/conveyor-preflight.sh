@@ -110,7 +110,20 @@ case "$action" in
     # Force-reset local branch to the remote state (avoids stale local divergence)
     git -C "$REPO_ROOT" fetch origin "$branch"
     git -C "$REPO_ROOT" checkout -B "$branch" "origin/$branch"
-    result="$(bash "$SCRIPT_DIR/open-pr-with-review.sh" "$title")"
+    # Exit 3 = the slice failed build/test, its branch was deleted, and the next tick
+    # re-slices. That is a routine conveyor outcome, not a preflight failure — letting
+    # set -e propagate it marked the systemd unit failed for work we handled correctly,
+    # so `list-units --state=failed` stopped being a usable signal for this conveyor.
+    pr_rc=0
+    result="$(bash "$SCRIPT_DIR/open-pr-with-review.sh" "$title")" || pr_rc=$?
+    if [[ $pr_rc -eq 3 ]]; then
+      echo "slice rejected by build/test — branch deleted, re-slicing next tick"
+      exit 0
+    fi
+    if [[ $pr_rc -ne 0 ]]; then
+      echo "open-pr failed unexpectedly (rc=$pr_rc)" >&2
+      exit "$pr_rc"
+    fi
     pr_num="$(echo "$result" | python3 -c "import json,sys; print(json.load(sys.stdin)['pr'])")"
     bash "$SCRIPT_DIR/router-conveyor.sh" record-started "$pr_num"
     echo "Opened PR #$pr_num for $branch"

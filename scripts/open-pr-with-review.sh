@@ -3,6 +3,8 @@
 # Refuses to open if `go build ./...` or `go test ./...` fails, and deletes the
 # pushed remote branch so the conveyor re-slices instead of looping on `open-pr`.
 # Output: {"pr":101,"url":"https://github.com/pjbrau/openclaw-router-proxy/pull/101"}
+# Exit: 0 opened · 3 slice rejected by build/test, branch deleted, re-slice next tick
+#       · 1 usage/unexpected failure
 set -euo pipefail
 
 REPO="${ROUTER_PROXY_REPO:-pjbrau/openclaw-router-proxy}"
@@ -28,7 +30,11 @@ abort_with_dead_branch() {
     git push origin --delete "$branch" >/dev/null 2>&1 || true
     echo "deleted remote branch $branch so conveyor re-slices" >&2
   fi
-  exit 1
+  # 3, not 1: this is the handled outcome — the slice was rejected, the branch is
+  # gone, and the conveyor will re-slice next tick. Callers that treat any nonzero
+  # as a crash marked their systemd unit failed for a result we deliberately
+  # produce. Still nonzero, because no PR was opened and no JSON was printed.
+  exit 3
 }
 
 BUILD_LOG="$(mktemp -t open-pr-build.XXXXXX.log)"
