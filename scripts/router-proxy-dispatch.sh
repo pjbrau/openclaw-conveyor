@@ -28,6 +28,10 @@ _notify() {
 
 _fire_agent() {
   local model="$1" timeout="$2" prompt="$3"
+  # Capture the agent's output. Every other conveyor writes this log; without it
+  # this dispatch leaves no trace, so a failed run can only be seen as the cron
+  # layer's `job execution timed out` with nothing to explain it.
+  local log="/tmp/conveyor-agent-${REPO_SLUG}.log"
   # Per-repo session id: without it the fired agent lands on the conveyor
   # agent's main session and holds its write lock for the whole run, starving
   # the 15-minute watcher ticks that need the same lock (they wait out a
@@ -37,11 +41,11 @@ _fire_agent() {
     --session-id "conveyor-${REPO_SLUG}" \
     --model "$model" \
     --message "$prompt" \
-    --timeout "$timeout" &
+    --timeout "$timeout" > "$log" 2>&1 &
   local pid=$!
   date +%s > "$LOCK_FILE"
   disown "$pid"
-  echo "$LOG_TAG agent fired (pid=$pid model=$model timeout=${timeout}s)"
+  echo "$LOG_TAG agent fired (pid=$pid model=$model timeout=${timeout}s log=$log)"
 }
 
 # ── Guard: timestamp-based lock (survives isolated sessions) ─────────────────
