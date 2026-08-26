@@ -28,8 +28,13 @@ _notify() {
 
 _fire_agent() {
   local model="$1" timeout="$2" prompt="$3"
+  # Per-repo session id: without it the fired agent lands on the conveyor
+  # agent's main session and holds its write lock for the whole run, starving
+  # the 15-minute watcher ticks that need the same lock (they wait out a
+  # hardcoded 10s acquire timeout and surface as `cron: job execution timed out`).
   openclaw agent \
     --agent conveyor \
+    --session-id "conveyor-${REPO_SLUG}" \
     --model "$model" \
     --message "$prompt" \
     --timeout "$timeout" &
